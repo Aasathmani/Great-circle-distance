@@ -36,3 +36,20 @@
     transform: rotate(360deg);
   }
 }
+
+.leaflet-marker-icon.leaflet-div-icon.leaflet-editing-icon {
+  background: rgb(193, 231, 25); /* Change the color to your preference */
+  border-radius: 50%;
+  width: 8px;
+  height: 8px;
+  border: 1px solid white; /* Optional: adds a white border */
+}
+
+/* Vertex markers after drawing */
+.leaflet-marker-icon.leaflet-div-icon.leaflet-edit-move {
+  background: rgb(193, 231, 25); /* Change the color to your preference */
+  border-radius: 50%;
+  width: 8px;
+  height: 8px;
+  border: 1px solid white; /* Optional: adds a white border */
+}
