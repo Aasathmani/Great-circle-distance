@@ -36,6 +36,8 @@ const PolylineComponent = ({ polyline, rhumbDistance, greatCircleDistance, waypo
   );
 };
 
+
+
 const calculateGreatCircleDistance = (latlng1, latlng2) => {
   const R = 6371.0; // Earth's radius in kilometers
   const toRadians = (degrees) => degrees * (Math.PI / 180);
@@ -60,27 +62,25 @@ const calculateGreatCircleDistance = (latlng1, latlng2) => {
 const calculateRhumbDistance = (latlng1, latlng2) => {
   const R = 6371.0; // Earth's radius in kilometers
   const toRadians = (degrees) => degrees * (Math.PI / 180);
-  const toDegrees = (radians) => radians * (180 / Math.PI);
 
   const φ1 = toRadians(latlng1.lat);
   const φ2 = toRadians(latlng2.lat);
   const Δφ = φ2 - φ1;
   let Δλ = toRadians(latlng2.lng - latlng1.lng);
 
-  const Δψ = Math.log(Math.tan(Math.PI / 4 + φ2 / 2) / Math.tan(Math.PI / 4 + φ1 / 2));
-
   // Ensure Δλ is in the range [-π, π]
   if (Math.abs(Δλ) > Math.PI) {
     Δλ = Δλ > 0 ? -(2 * Math.PI - Δλ) : (2 * Math.PI + Δλ);
   }
 
-  // q is the isometric latitude factor
+  const Δψ = Math.log(Math.tan(Math.PI / 4 + φ2 / 2) / Math.tan(Math.PI / 4 + φ1 / 2));
   const q = Math.abs(Δψ) > 10e-12 ? Δφ / Δψ : Math.cos(φ1);
 
   const distance = Math.sqrt(Δφ * Δφ + q * q * Δλ * Δλ) * R;
 
   return distance; // Distance in kilometers
 };
+
 
 const calculateCurvatureAngle = (latlng1, latlng2, controlPoint) => {
   const toRadians = (degrees) => degrees * (Math.PI / 180);
@@ -153,8 +153,12 @@ const DrawControl = ({ setPolyline, setRhumbDistance, setGreatCircleDistance, se
         const latlngs = layer.getLatLngs();
         setPolyline(latlngs);
         if (latlngs.length >= 2) {
+          const initialWaypoint = latlngs[0];
+          const endingWaypoint = latlngs[latlngs.length - 1];
           const rhumbDistance = calculateRhumbDistance(latlngs[0], latlngs[1]);
           const greatCircleDistance = calculateGreatCircleDistance(latlngs[0], latlngs[1]);
+          //const greatCircleDistance = calculateGreatCircleDistance({lat:34.0833,lun:134.5831333}, {lat:49.3031,lon:122.7963889});
+          setRhumbDistance(rhumbDistance);
           setRhumbDistance(rhumbDistance);
           setGreatCircleDistance(greatCircleDistance);
 
@@ -162,6 +166,8 @@ const DrawControl = ({ setPolyline, setRhumbDistance, setGreatCircleDistance, se
           setCurve({ curvePath, waypoints, curvatureAngle });
 
           // Log waypoints and distances
+          console.log("Initial Waypoint:", initialWaypoint);
+          console.log("Ending Waypoint:", endingWaypoint);
           console.log("Waypoints:", waypoints);
           console.log("Rhumb Line Distance:", rhumbDistance.toFixed(2), "km");
           console.log("Great Circle Distance:", greatCircleDistance.toFixed(2), "km");
