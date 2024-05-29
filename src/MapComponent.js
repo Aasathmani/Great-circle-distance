@@ -4,13 +4,12 @@ import 'leaflet/dist/leaflet.css';
 import 'leaflet-draw/dist/leaflet.draw.css';
 import L from 'leaflet';
 import 'leaflet-draw';
-import 'leaflet-curve';
 
 const PolylineComponent = ({ polyline, rhumbDistance, greatCircleDistance, waypoints, curvatureAngle }) => {
   return (
     polyline && (
       <>
-        <Polyline positions={polyline} color="blue">
+        <Polyline positions={waypoints.map(wp => [wp.lat, wp.lng])} color="blue">
           <Popup>
             <div>
               <div>Rhumb Line Distance: {rhumbDistance.toFixed(2)} km</div>
@@ -77,44 +76,46 @@ const calculateCurvatureAngle = (latlng1, latlng2, controlPoint) => {
   const toRadians = (degrees) => degrees * (Math.PI / 180);
   const toDegrees = (radians) => radians * (180 / Math.PI);
 
-  const angle1 = Math.atan2(controlPoint[0] - latlng1.lat, controlPoint[1] - latlng1.lng);
+  const angle1 = Math.atan2(controlPoint.lat - latlng1.lat, controlPoint.lng - latlng1.lng);
   const angle2 = Math.atan2(latlng2.lat - latlng1.lat, latlng2.lng - latlng1.lng);
   const angleDiff = angle2 - angle1;
 
   return Math.abs(toDegrees(angleDiff));
 };
 
-const generateCurvePath = (latlng1, latlng2) => {
-  const controlPoint = [
-    (latlng1.lat + latlng2.lat) / 2 + 10,
-    (latlng1.lng + latlng2.lng) / 2,
-  ];
-  const curvePath = [
-    'M',
-    [latlng1.lat, latlng1.lng],
-    'Q',
-    controlPoint,
-    [latlng2.lat, latlng2.lng],
-  ];
+const calculateGreatCirclePath = (latlng1, latlng2, numPoints = 100) => {
+  const toRadians = (degrees) => degrees * (Math.PI / 180);
+  const toDegrees = (radians) => radians * (180 / Math.PI);
 
-  // Generate waypoints along the curve
+  const lat1 = toRadians(latlng1.lat);
+  const lon1 = toRadians(latlng1.lng);
+  const lat2 = toRadians(latlng2.lat);
+  const lon2 = toRadians(latlng2.lng);
+
+  const d = 2 * Math.asin(
+    Math.sqrt(
+      Math.sin((lat2 - lat1) / 2) ** 2 +
+      Math.cos(lat1) * Math.cos(lat2) * Math.sin((lon2 - lon1) / 2) ** 2
+    )
+  );
+
   const waypoints = [];
-  const numPoints = 100; // Number of points along the curve
-  for (let t = 0; t <= 1; t += 1 / numPoints) {
-    const lat =
-      (1 - t) * (1 - t) * latlng1.lat +
-      2 * (1 - t) * t * controlPoint[0] +
-      t * t * latlng2.lat;
-    const lng =
-      (1 - t) * (1 - t) * latlng1.lng +
-      2 * (1 - t) * t * controlPoint[1] +
-      t * t * latlng2.lng;
-    waypoints.push({ lat, lng });
+  for (let i = 0; i <= numPoints; i++) {
+    const f = i / numPoints;
+    const A = Math.sin((1 - f) * d) / Math.sin(d);
+    const B = Math.sin(f * d) / Math.sin(d);
+
+    const x = A * Math.cos(lat1) * Math.cos(lon1) + B * Math.cos(lat2) * Math.cos(lon2);
+    const y = A * Math.cos(lat1) * Math.sin(lon1) + B * Math.cos(lat2) * Math.sin(lon2);
+    const z = A * Math.sin(lat1) + B * Math.sin(lat2);
+
+    const lat = Math.atan2(z, Math.sqrt(x * x + y * y));
+    const lon = Math.atan2(y, x);
+
+    waypoints.push({ lat: toDegrees(lat), lng: toDegrees(lon) });
   }
 
-  const curvatureAngle = calculateCurvatureAngle(latlng1, latlng2, controlPoint);
-
-  return { curvePath, waypoints, curvatureAngle };
+  return waypoints;
 };
 
 const DrawControl = ({ setPolyline, setRhumbDistance, setGreatCircleDistance, setCurve }) => {
@@ -146,13 +147,14 @@ const DrawControl = ({ setPolyline, setRhumbDistance, setGreatCircleDistance, se
         if (latlngs.length >= 2) {
           const initialWaypoint = latlngs[0];
           const endingWaypoint = latlngs[latlngs.length - 1];
-          const rhumbDistance = calculateRhumbDistance(latlngs[0], latlngs[1]);
-          const greatCircleDistance = calculateGreatCircleDistance(latlngs[0], latlngs[1]);
+          const rhumbDistance = calculateRhumbDistance(initialWaypoint, endingWaypoint);
+          const greatCircleDistance = calculateGreatCircleDistance(initialWaypoint, endingWaypoint);
           setRhumbDistance(rhumbDistance);
           setGreatCircleDistance(greatCircleDistance);
 
-          const { curvePath, waypoints, curvatureAngle } = generateCurvePath(latlngs[0], latlngs[1]);
-          setCurve({ curvePath, waypoints, curvatureAngle });
+          const waypoints = calculateGreatCirclePath(initialWaypoint, endingWaypoint);
+          const curvatureAngle = calculateCurvatureAngle(initialWaypoint, endingWaypoint, waypoints[Math.floor(waypoints.length / 2)]);
+          setCurve({ waypoints, curvatureAngle });
 
           // Log waypoints and distances
           console.log("Initial Waypoint:", initialWaypoint);
@@ -174,22 +176,6 @@ const DrawControl = ({ setPolyline, setRhumbDistance, setGreatCircleDistance, se
       map.removeControl(drawControl);
     };
   }, [map, drawnItems, setPolyline, setRhumbDistance, setGreatCircleDistance, setCurve]);
-
-  return null;
-};
-
-const CurveComponent = ({ curve }) => {
-  const map = useMap();
-
-  useEffect(() => {
-    if (curve) {
-      const curveLayer = L.curve(curve.curvePath, { color: 'red' }).addTo(map);
-
-      return () => {
-        map.removeLayer(curveLayer);
-      };
-    }
-  }, [map, curve]);
 
   return null;
 };
@@ -224,7 +210,6 @@ const MapComponent = () => {
         waypoints={curve ? curve.waypoints : []}
         curvatureAngle={curve ? curve.curvatureAngle : 0}
       />
-      {curve && <CurveComponent curve={curve} />}
     </MapContainer>
   );
 };
