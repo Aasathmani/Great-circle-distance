@@ -1,5 +1,3 @@
-// src/MapComponent.js
-
 import React, { useEffect, useRef, useState } from 'react';
 import { MapContainer, TileLayer, Polyline, Popup, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -36,8 +34,6 @@ const PolylineComponent = ({ polyline, rhumbDistance, greatCircleDistance, waypo
   );
 };
 
-
-
 const calculateGreatCircleDistance = (latlng1, latlng2) => {
   const R = 6371.0; // Earth's radius in kilometers
   const toRadians = (degrees) => degrees * (Math.PI / 180);
@@ -47,16 +43,12 @@ const calculateGreatCircleDistance = (latlng1, latlng2) => {
   const lat2 = toRadians(latlng2.lat);
   const lon2 = toRadians(latlng2.lng);
 
-  const dLat = lat2 - lat1;
-  const dLon = lon2 - lon1;
+  const distance = R * Math.acos(
+    Math.cos(lat1) * Math.cos(lat2) * Math.cos(lon1 - lon2) +
+    Math.sin(lat1) * Math.sin(lat2)
+  );
 
-  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-            Math.cos(lat1) * Math.cos(lat2) *
-            Math.sin(dLon / 2) * Math.sin(dLon / 2);
-
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-  return R * c; // Distance in kilometers
+  return distance; // Distance in kilometers
 };
 
 const calculateRhumbDistance = (latlng1, latlng2) => {
@@ -80,7 +72,6 @@ const calculateRhumbDistance = (latlng1, latlng2) => {
 
   return distance; // Distance in kilometers
 };
-
 
 const calculateCurvatureAngle = (latlng1, latlng2, controlPoint) => {
   const toRadians = (degrees) => degrees * (Math.PI / 180);
@@ -157,8 +148,6 @@ const DrawControl = ({ setPolyline, setRhumbDistance, setGreatCircleDistance, se
           const endingWaypoint = latlngs[latlngs.length - 1];
           const rhumbDistance = calculateRhumbDistance(latlngs[0], latlngs[1]);
           const greatCircleDistance = calculateGreatCircleDistance(latlngs[0], latlngs[1]);
-          //const greatCircleDistance = calculateGreatCircleDistance({lat:34.0833,lun:134.5831333}, {lat:49.3031,lon:122.7963889});
-          setRhumbDistance(rhumbDistance);
           setRhumbDistance(rhumbDistance);
           setGreatCircleDistance(greatCircleDistance);
 
