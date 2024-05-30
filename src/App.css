@@ -80,3 +80,17 @@ button {
 button:hover {
   background-color: #0056b3;
 }
+.white-marker {
+  background-color: white;
+  border-radius: 50%;
+  width: 8px;
+  height: 8px;
+  border: 2px solid black;
+}
+.white-circle-marker {
+  background-color: white;
+  border: 2px solid black;
+  border-radius: 50%;
+  width: 10px; /* Adjust size as needed */
+  height: 10px; /* Adjust size as needed */
+}

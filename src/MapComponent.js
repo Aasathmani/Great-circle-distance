@@ -1,37 +1,39 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { MapContainer, TileLayer, Polyline, Popup, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Polyline, Popup, useMap, Marker } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import 'leaflet-draw/dist/leaflet.draw.css';
 import L from 'leaflet';
-import 'leaflet-draw';
+import 'leaflet-draw'; 
 
-const PolylineComponent = ({ segments }) => {
+const PolylineComponent = ({ segments, handleSegmentClick }) => {
   return (
     <>
-      {segments.map((segment, index) => (
-        <Polyline key={index} positions={segment.waypoints.map(wp => [wp.lat, wp.lng])} color="blue">
-          <Popup>
-            <div>
-              <div>Rhumb Line Distance: {segment.rhumbDistance.toFixed(2)} km</div>
-              <div>Great Circle Distance: {segment.greatCircleDistance.toFixed(2)} km</div>
-              <div>Curvature Angle: {segment.curvatureAngle.toFixed(2)}°</div>
-              <div>
-                Waypoints:
-                <ul>
-                  {segment.waypoints.map((point, idx) => (
-                    <li key={idx}>
-                      {point.lat.toFixed(5)}, {point.lng.toFixed(5)}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          </Popup>
-        </Polyline>
+      {segments.map((segment, segmentIndex) => (
+        <React.Fragment key={segmentIndex}>
+          <Polyline
+            positions={segment.waypoints.length ? segment.waypoints.map(wp => [wp.lat, wp.lng]) : segment.latlngs.map(latlng => [latlng.lat, latlng.lng])}
+            color={segment.waypoints.length ? "blue" : "red"}
+            eventHandlers={{ click: () => handleSegmentClick(segmentIndex) }}
+          >
+            {segment.latlngs.length > 0 && (
+            <>
+              <Marker
+                position={[segment.latlngs[0].lat, segment.latlngs[0].lng]}
+                icon={L.divIcon({ className: 'white-marker' })}
+              />
+              <Marker
+                position={[segment.latlngs[segment.latlngs.length - 1].lat, segment.latlngs[segment.latlngs.length - 1].lng]}
+                icon={L.divIcon({ className: 'white-marker' })}
+              />
+            </>
+          )}
+          </Polyline>
+        </React.Fragment>
       ))}
     </>
   );
 };
+
 
 const calculateGreatCircleDistance = (latlng1, latlng2) => {
   const R = 6371.0; // Earth's radius in kilometers
@@ -153,36 +155,16 @@ const DrawControl = ({ setSegments }) => {
     map.on(L.Draw.Event.CREATED, (event) => {
       const { layerType, layer } = event;
       if (layerType === 'polyline') {
-        let latlngs = layer.getLatLngs();
-        const segments = [];
+        const latlngs = layer.getLatLngs();
+        const segments = latlngs.map((latlng, index) => ({
+          latlngs: [latlng, latlngs[index + 1]].filter(Boolean),
+          waypoints: [], // Empty waypoints initially
+          rhumbDistance: 0,
+          greatCircleDistance: 0,
+          curvatureAngle: 0,
+        })).slice(0, -1); // Remove the last incomplete segment
 
-        for (let i = 0; i < latlngs.length - 1; i++) {
-          const initialWaypoint = latlngs[i];
-          const endingWaypoint = latlngs[i + 1];
-          const rhumbDistance = calculateRhumbDistance(initialWaypoint, endingWaypoint);
-          const greatCircleDistance = calculateGreatCircleDistance(initialWaypoint, endingWaypoint);
-
-          const waypoints = calculateGreatCirclePath(initialWaypoint, endingWaypoint);
-          const curvatureAngle = calculateCurvatureAngle(initialWaypoint, endingWaypoint, waypoints[Math.floor(waypoints.length / 2)]);
-
-          segments.push({
-            rhumbDistance,
-            greatCircleDistance,
-            curvatureAngle,
-            waypoints
-          });
-
-          // Log waypoints and distances for each segment
-          console.log(`Segment ${i + 1}:`);
-          console.log("Initial Waypoint:", initialWaypoint);
-          console.log("Ending Waypoint:", endingWaypoint);
-          console.log("Waypoints:", waypoints);
-          console.log("Rhumb Line Distance:", rhumbDistance.toFixed(2), "km");
-          console.log("Great Circle Distance:", greatCircleDistance.toFixed(2), "km");
-          console.log("Curvature Angle:", curvatureAngle.toFixed(2), "°");
-        }
-
-        setSegments(segments);
+        setSegments((prevSegments) => [...prevSegments, ...segments]);
         drawnItems.addLayer(layer);
       }
     });
@@ -203,6 +185,31 @@ const MapComponent = () => {
   const position = [51.505, -0.09];
   const [segments, setSegments] = useState([]);
 
+  const handleSegmentClick = (index) => {
+    setSegments((prevSegments) => {
+      const newSegments = [...prevSegments];
+      const segment = newSegments[index];
+
+      if (!segment.waypoints.length) {
+        const [initialWaypoint, endingWaypoint] = segment.latlngs;
+        segment.rhumbDistance = calculateRhumbDistance(initialWaypoint, endingWaypoint);
+        segment.greatCircleDistance = calculateGreatCircleDistance(initialWaypoint, endingWaypoint);
+        segment.waypoints = calculateGreatCirclePath(initialWaypoint, endingWaypoint);
+        segment.curvatureAngle = calculateCurvatureAngle(initialWaypoint, endingWaypoint, segment.waypoints[Math.floor(segment.waypoints.length / 2)]);
+
+        console.log(`Segment ${index + 1}:`);
+        console.log("Initial Waypoint:", initialWaypoint);
+        console.log("Ending Waypoint:", endingWaypoint);
+        console.log("Waypoints:", segment.waypoints);
+        console.log("Rhumb Line Distance:", segment.rhumbDistance.toFixed(2), "km");
+        console.log("Great Circle Distance:", segment.greatCircleDistance.toFixed(2), "km");
+        console.log("Curvature Angle:", segment.curvatureAngle.toFixed(2), "°");
+      }
+
+      return newSegments;
+    });
+  };
+
   return (
     <MapContainer
       center={position}
@@ -210,12 +217,13 @@ const MapComponent = () => {
       style={{ height: '100vh', width: '100%' }}
       worldCopyJump={true}
     >
+      
       <TileLayer
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
       />
       <DrawControl setSegments={setSegments} />
-      <PolylineComponent segments={segments} />
+      <PolylineComponent segments={segments} handleSegmentClick={handleSegmentClick} />
     </MapContainer>
   );
 };
