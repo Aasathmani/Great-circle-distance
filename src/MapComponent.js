@@ -5,21 +5,21 @@ import 'leaflet-draw/dist/leaflet.draw.css';
 import L from 'leaflet';
 import 'leaflet-draw';
 
-const PolylineComponent = ({ polyline, rhumbDistance, greatCircleDistance, waypoints, curvatureAngle }) => {
+const PolylineComponent = ({ segments }) => {
   return (
-    polyline && (
-      <>
-        <Polyline positions={waypoints.map(wp => [wp.lat, wp.lng])} color="blue">
+    <>
+      {segments.map((segment, index) => (
+        <Polyline key={index} positions={segment.waypoints.map(wp => [wp.lat, wp.lng])} color="blue">
           <Popup>
             <div>
-              <div>Rhumb Line Distance: {rhumbDistance.toFixed(2)} km</div>
-              <div>Great Circle Distance: {greatCircleDistance.toFixed(2)} km</div>
-              <div>Curvature Angle: {curvatureAngle.toFixed(2)}°</div>
+              <div>Rhumb Line Distance: {segment.rhumbDistance.toFixed(2)} km</div>
+              <div>Great Circle Distance: {segment.greatCircleDistance.toFixed(2)} km</div>
+              <div>Curvature Angle: {segment.curvatureAngle.toFixed(2)}°</div>
               <div>
                 Waypoints:
                 <ul>
-                  {waypoints.map((point, index) => (
-                    <li key={index}>
+                  {segment.waypoints.map((point, idx) => (
+                    <li key={idx}>
                       {point.lat.toFixed(5)}, {point.lng.toFixed(5)}
                     </li>
                   ))}
@@ -28,8 +28,8 @@ const PolylineComponent = ({ polyline, rhumbDistance, greatCircleDistance, waypo
             </div>
           </Popup>
         </Polyline>
-      </>
-    )
+      ))}
+    </>
   );
 };
 
@@ -115,10 +115,21 @@ const calculateGreatCirclePath = (latlng1, latlng2, numPoints = 100) => {
     waypoints.push({ lat: toDegrees(lat), lng: toDegrees(lon) });
   }
 
+  // Adjust waypoints for wrap-around if necessary
+  for (let i = 1; i < waypoints.length; i++) {
+    if (Math.abs(waypoints[i].lng - waypoints[i - 1].lng) > 180) {
+      if (waypoints[i].lng > waypoints[i - 1].lng) {
+        waypoints[i].lng -= 360;
+      } else {
+        waypoints[i].lng += 360;
+      }
+    }
+  }
+
   return waypoints;
 };
 
-const DrawControl = ({ setPolyline, setRhumbDistance, setGreatCircleDistance, setCurve }) => {
+const DrawControl = ({ setSegments }) => {
   const map = useMap();
   const drawnItems = useRef(new L.FeatureGroup()).current;
 
@@ -142,21 +153,27 @@ const DrawControl = ({ setPolyline, setRhumbDistance, setGreatCircleDistance, se
     map.on(L.Draw.Event.CREATED, (event) => {
       const { layerType, layer } = event;
       if (layerType === 'polyline') {
-        const latlngs = layer.getLatLngs();
-        setPolyline(latlngs);
-        if (latlngs.length >= 2) {
-          const initialWaypoint = latlngs[0];
-          const endingWaypoint = latlngs[latlngs.length - 1];
+        let latlngs = layer.getLatLngs();
+        const segments = [];
+
+        for (let i = 0; i < latlngs.length - 1; i++) {
+          const initialWaypoint = latlngs[i];
+          const endingWaypoint = latlngs[i + 1];
           const rhumbDistance = calculateRhumbDistance(initialWaypoint, endingWaypoint);
           const greatCircleDistance = calculateGreatCircleDistance(initialWaypoint, endingWaypoint);
-          setRhumbDistance(rhumbDistance);
-          setGreatCircleDistance(greatCircleDistance);
 
           const waypoints = calculateGreatCirclePath(initialWaypoint, endingWaypoint);
           const curvatureAngle = calculateCurvatureAngle(initialWaypoint, endingWaypoint, waypoints[Math.floor(waypoints.length / 2)]);
-          setCurve({ waypoints, curvatureAngle });
 
-          // Log waypoints and distances
+          segments.push({
+            rhumbDistance,
+            greatCircleDistance,
+            curvatureAngle,
+            waypoints
+          });
+
+          // Log waypoints and distances for each segment
+          console.log(`Segment ${i + 1}:`);
           console.log("Initial Waypoint:", initialWaypoint);
           console.log("Ending Waypoint:", endingWaypoint);
           console.log("Waypoints:", waypoints);
@@ -164,6 +181,8 @@ const DrawControl = ({ setPolyline, setRhumbDistance, setGreatCircleDistance, se
           console.log("Great Circle Distance:", greatCircleDistance.toFixed(2), "km");
           console.log("Curvature Angle:", curvatureAngle.toFixed(2), "°");
         }
+
+        setSegments(segments);
         drawnItems.addLayer(layer);
       }
     });
@@ -175,41 +194,28 @@ const DrawControl = ({ setPolyline, setRhumbDistance, setGreatCircleDistance, se
       map.removeLayer(drawnItems);
       map.removeControl(drawControl);
     };
-  }, [map, drawnItems, setPolyline, setRhumbDistance, setGreatCircleDistance, setCurve]);
+  }, [map, drawnItems, setSegments]);
 
   return null;
 };
 
 const MapComponent = () => {
   const position = [51.505, -0.09];
-  const [polyline, setPolyline] = useState(null);
-  const [rhumbDistance, setRhumbDistance] = useState(null);
-  const [greatCircleDistance, setGreatCircleDistance] = useState(null);
-  const [curve, setCurve] = useState(null);
+  const [segments, setSegments] = useState([]);
 
   return (
     <MapContainer
       center={position}
-      zoom={13}
+      zoom={2}
       style={{ height: '100vh', width: '100%' }}
+      worldCopyJump={true}
     >
       <TileLayer
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
       />
-      <DrawControl
-        setPolyline={setPolyline}
-        setRhumbDistance={setRhumbDistance}
-        setGreatCircleDistance={setGreatCircleDistance}
-        setCurve={setCurve}
-      />
-      <PolylineComponent
-        polyline={polyline}
-        rhumbDistance={rhumbDistance}
-        greatCircleDistance={greatCircleDistance}
-        waypoints={curve ? curve.waypoints : []}
-        curvatureAngle={curve ? curve.curvatureAngle : 0}
-      />
+      <DrawControl setSegments={setSegments} />
+      <PolylineComponent segments={segments} />
     </MapContainer>
   );
 };
