@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { MapContainer, TileLayer, Polyline, Popup, useMap, Marker } from 'react-leaflet';
+import { MapContainer, TileLayer, Polyline, Marker, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import 'leaflet-draw/dist/leaflet.draw.css';
 import L from 'leaflet';
 import 'leaflet-draw'; 
+import './App.css'; // Make sure you have the custom styles
 
-const PolylineComponent = ({ segments, handleSegmentClick }) => {
+const PolylineComponent = ({ segments, handleSegmentClick, handleContextMenu }) => {
   return (
     <>
       {segments.map((segment, segmentIndex) => (
@@ -13,27 +14,29 @@ const PolylineComponent = ({ segments, handleSegmentClick }) => {
           <Polyline
             positions={segment.waypoints.length ? segment.waypoints.map(wp => [wp.lat, wp.lng]) : segment.latlngs.map(latlng => [latlng.lat, latlng.lng])}
             color={segment.waypoints.length ? "blue" : "red"}
-            eventHandlers={{ click: () => handleSegmentClick(segmentIndex) }}
+            eventHandlers={{
+              click: () => handleSegmentClick(segmentIndex),
+              contextmenu: (e) => handleContextMenu(e, segmentIndex)
+            }}
           >
             {segment.latlngs.length > 0 && (
-            <>
-              <Marker
-                position={[segment.latlngs[0].lat, segment.latlngs[0].lng]}
-                icon={L.divIcon({ className: 'white-marker' })}
-              />
-              <Marker
-                position={[segment.latlngs[segment.latlngs.length - 1].lat, segment.latlngs[segment.latlngs.length - 1].lng]}
-                icon={L.divIcon({ className: 'white-marker' })}
-              />
-            </>
-          )}
+              <>
+                <Marker
+                  position={[segment.latlngs[0].lat, segment.latlngs[0].lng]}
+                  icon={L.divIcon({ className: 'white-marker' })}
+                />
+                <Marker
+                  position={[segment.latlngs[segment.latlngs.length - 1].lat, segment.latlngs[segment.latlngs.length - 1].lng]}
+                  icon={L.divIcon({ className: 'white-marker' })}
+                />
+              </>
+            )}
           </Polyline>
         </React.Fragment>
       ))}
     </>
   );
 };
-
 
 const calculateGreatCircleDistance = (latlng1, latlng2) => {
   const R = 6371.0; // Earth's radius in kilometers
@@ -156,13 +159,22 @@ const DrawControl = ({ setSegments }) => {
       const { layerType, layer } = event;
       if (layerType === 'polyline') {
         const latlngs = layer.getLatLngs();
-        const segments = latlngs.map((latlng, index) => ({
-          latlngs: [latlng, latlngs[index + 1]].filter(Boolean),
-          waypoints: [], // Empty waypoints initially
-          rhumbDistance: 0,
-          greatCircleDistance: 0,
-          curvatureAngle: 0,
-        })).slice(0, -1); // Remove the last incomplete segment
+        const segments = latlngs.map((latlng, index) => {
+          if (!latlngs[index + 1]) return null; // Skip the last incomplete segment
+          const initialWaypoint = latlng;
+          const endingWaypoint = latlngs[index + 1];
+          const rhumbDistance = calculateRhumbDistance(initialWaypoint, endingWaypoint);
+          const greatCircleDistance = calculateGreatCircleDistance(initialWaypoint, endingWaypoint);
+          const waypoints = rhumbDistance > 250 * 1.852 ? calculateGreatCirclePath(initialWaypoint, endingWaypoint) : [];
+
+          return {
+            latlngs: [initialWaypoint, endingWaypoint],
+            waypoints,
+            rhumbDistance,
+            greatCircleDistance,
+            curvatureAngle: waypoints.length ? calculateCurvatureAngle(initialWaypoint, endingWaypoint, waypoints[Math.floor(waypoints.length / 2)]) : 0,
+          };
+        }).filter(Boolean); // Remove null values
 
         setSegments((prevSegments) => [...prevSegments, ...segments]);
         drawnItems.addLayer(layer);
@@ -184,13 +196,14 @@ const DrawControl = ({ setSegments }) => {
 const MapComponent = () => {
   const position = [51.505, -0.09];
   const [segments, setSegments] = useState([]);
+  const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0, segmentIndex: null });
 
-  const handleSegmentClick = (index) => {
+  const handleSegmentClick = (index, action) => {
     setSegments((prevSegments) => {
       const newSegments = [...prevSegments];
       const segment = newSegments[index];
 
-      if (!segment.waypoints.length) {
+      if (action === 'greatcircle' && !segment.waypoints.length) {
         const [initialWaypoint, endingWaypoint] = segment.latlngs;
         segment.rhumbDistance = calculateRhumbDistance(initialWaypoint, endingWaypoint);
         segment.greatCircleDistance = calculateGreatCircleDistance(initialWaypoint, endingWaypoint);
@@ -204,27 +217,58 @@ const MapComponent = () => {
         console.log("Rhumb Line Distance:", segment.rhumbDistance.toFixed(2), "km");
         console.log("Great Circle Distance:", segment.greatCircleDistance.toFixed(2), "km");
         console.log("Curvature Angle:", segment.curvatureAngle.toFixed(2), "°");
+      } else if (action === 'rhumb' && segment.waypoints.length) {
+        segment.waypoints = [];
+        segment.curvatureAngle = 0;
       }
 
       return newSegments;
     });
   };
 
+  const handleContextMenu = (e, index) => {
+    L.DomEvent.preventDefault(e); // Prevent the default context menu
+    setContextMenu({
+      visible: true,
+      x: e.containerPoint.x,
+      y: e.containerPoint.y,
+      segmentIndex: index
+    });
+  };
+
+  const handleContextMenuAction = (action) => {
+    if (contextMenu.segmentIndex !== null) {
+      handleSegmentClick(contextMenu.segmentIndex, action);
+      setContextMenu({ ...contextMenu, visible: false });
+    }
+  };
+
   return (
-    <MapContainer
-      center={position}
-      zoom={2}
-      style={{ height: '100vh', width: '100%' }}
-      worldCopyJump={true}
-    >
-      
-      <TileLayer
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-      />
-      <DrawControl setSegments={setSegments} />
-      <PolylineComponent segments={segments} handleSegmentClick={handleSegmentClick} />
-    </MapContainer>
+    <div>
+      <MapContainer
+        center={position}
+        zoom={2}
+        style={{ height: '100vh', width: '100%' }}
+        worldCopyJump={true}
+      >
+        <TileLayer
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        />
+        <DrawControl setSegments={setSegments} />
+        <PolylineComponent segments={segments} handleSegmentClick={handleSegmentClick} handleContextMenu={handleContextMenu} />
+      </MapContainer>
+
+      {contextMenu.visible && (
+        <div className="context-menu" style={{ top: contextMenu.y, left: contextMenu.x }}>
+          {segments[contextMenu.segmentIndex].waypoints.length ? (
+            <div onClick={() => handleContextMenuAction('rhumb')}>Convert to Rhumb Line</div>
+          ) : (
+            <div onClick={() => handleContextMenuAction('greatcircle')}>Convert to Great Circle Path</div>
+          )}
+        </div>
+      )}
+    </div>
   );
 };
 
