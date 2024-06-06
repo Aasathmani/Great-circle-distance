@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { MapContainer, TileLayer, Polyline, Marker, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Polyline, Marker, useMap,Tooltip } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import 'leaflet-draw/dist/leaflet.draw.css';
 import L from 'leaflet';
@@ -19,6 +19,13 @@ const PolylineComponent = ({ segments, handleSegmentClick, handleContextMenu }) 
               contextmenu: (e) => handleContextMenu(e, segmentIndex)
             }}
           >
+             <Tooltip>
+              <span>
+                Rhumb Line Distance: {segment.rhumbDistance.toFixed(2)} km ({(segment.rhumbDistance / 1.852).toFixed(2)} nm)<br />
+                Great Circle Distance: {segment.greatCircleDistance.toFixed(2)} km ({(segment.greatCircleDistance / 1.852).toFixed(2)} nm)<br />
+                Curvature Angle: {segment.curvatureAngle.toFixed(2)}°
+              </span>
+            </Tooltip>
             {segment.latlngs.length > 0 && (
               <>
                 <Marker
@@ -59,20 +66,20 @@ const calculateRhumbDistance = (latlng1, latlng2) => {
   const R = 6371.0; // Earth's radius in kilometers
   const toRadians = (degrees) => degrees * (Math.PI / 180);
 
-  const φ1 = toRadians(latlng1.lat);
-  const φ2 = toRadians(latlng2.lat);
-  const Δφ = φ2 - φ1;
-  let Δλ = toRadians(latlng2.lng - latlng1.lng);
+  const d1 = toRadians(latlng1.lat);
+  const d2 = toRadians(latlng2.lat);
+  const a1 = d2 - d1;
+  let a2 = toRadians(latlng2.lng - latlng1.lng);
 
-  // Ensure Δλ is in the range [-π, π]
-  if (Math.abs(Δλ) > Math.PI) {
-    Δλ = Δλ > 0 ? -(2 * Math.PI - Δλ) : (2 * Math.PI + Δλ);
+  // Ensure a2 is in the range [-π, π]
+  if (Math.abs(a2) > Math.PI) {
+    a2 = a2 > 0 ? -(2 * Math.PI - a2) : (2 * Math.PI + a2);
   }
 
-  const Δψ = Math.log(Math.tan(Math.PI / 4 + φ2 / 2) / Math.tan(Math.PI / 4 + φ1 / 2));
-  const q = Math.abs(Δψ) > 10e-12 ? Δφ / Δψ : Math.cos(φ1);
+  const a3 = Math.log(Math.tan(Math.PI / 4 + d2 / 2) / Math.tan(Math.PI / 4 + d1 / 2));
+  const q = Math.abs(a3) > 10e-12 ? a1 / a3 : Math.cos(d1);
 
-  const distance = Math.sqrt(Δφ * Δφ + q * q * Δλ * Δλ) * R;
+  const distance = Math.sqrt(a1 * a1 + q * q * a2 * a2) * R;
 
   return distance; // Distance in kilometers
 };
@@ -165,7 +172,7 @@ const DrawControl = ({ setSegments }) => {
           const endingWaypoint = latlngs[index + 1];
           const rhumbDistance = calculateRhumbDistance(initialWaypoint, endingWaypoint);
           const greatCircleDistance = calculateGreatCircleDistance(initialWaypoint, endingWaypoint);
-          const waypoints = rhumbDistance > 250 * 1.852 ? calculateGreatCirclePath(initialWaypoint, endingWaypoint) : [];
+          const waypoints = calculateGreatCirclePath(initialWaypoint, endingWaypoint);
 
           return {
             latlngs: [initialWaypoint, endingWaypoint],
