@@ -1,101 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { MapContainer, TileLayer, Polyline, Marker, useMap,Tooltip } from 'react-leaflet';
-import 'leaflet/dist/leaflet.css';
-import 'leaflet-draw/dist/leaflet.draw.css';
-import L from 'leaflet';
-import 'leaflet-draw'; 
-import './App.css'; // Make sure you have the custom styles
+import 'ol/ol.css';
+import { Map, View } from 'ol';
+import TileLayer from 'ol/layer/Tile';
+import OSM from 'ol/source/OSM';
+import { fromLonLat, toLonLat } from 'ol/proj';
+import { LineString } from 'ol/geom';
+import VectorLayer from 'ol/layer/Vector';
+import VectorSource from 'ol/source/Vector';
+import { Stroke, Style } from 'ol/style';
+import { Draw, Modify, Snap } from 'ol/interaction';
 
-const PolylineComponent = ({ segments, handleSegmentClick, handleContextMenu }) => {
-  return (
-    <>
-      {segments.map((segment, segmentIndex) => (
-        <React.Fragment key={segmentIndex}>
-          <Polyline
-            positions={segment.waypoints.length ? segment.waypoints.map(wp => [wp.lat, wp.lng]) : segment.latlngs.map(latlng => [latlng.lat, latlng.lng])}
-            color={segment.waypoints.length ? "blue" : "red"}
-            eventHandlers={{
-              click: () => handleSegmentClick(segmentIndex),
-              contextmenu: (e) => handleContextMenu(e, segmentIndex)
-            }}
-          >
-             <Tooltip>
-              <span>
-                Rhumb Line Distance: {segment.rhumbDistance.toFixed(2)} km ({(segment.rhumbDistance / 1.852).toFixed(2)} nm)<br />
-                Great Circle Distance: {segment.greatCircleDistance.toFixed(2)} km ({(segment.greatCircleDistance / 1.852).toFixed(2)} nm)<br />
-                Curvature Angle: {segment.curvatureAngle.toFixed(2)}°
-              </span>
-            </Tooltip>
-            {segment.latlngs.length > 0 && (
-              <>
-                <Marker
-                  position={[segment.latlngs[0].lat, segment.latlngs[0].lng]}
-                  icon={L.divIcon({ className: 'white-marker' })}
-                />
-                <Marker
-                  position={[segment.latlngs[segment.latlngs.length - 1].lat, segment.latlngs[segment.latlngs.length - 1].lng]}
-                  icon={L.divIcon({ className: 'white-marker' })}
-                />
-              </>
-            )}
-          </Polyline>
-        </React.Fragment>
-      ))}
-    </>
-  );
-};
-
-const calculateGreatCircleDistance = (latlng1, latlng2) => {
-  const R = 6371.0; // Earth's radius in kilometers
-  const toRadians = (degrees) => degrees * (Math.PI / 180);
-
-  const lat1 = toRadians(latlng1.lat);
-  const lon1 = toRadians(latlng1.lng);
-  const lat2 = toRadians(latlng2.lat);
-  const lon2 = toRadians(latlng2.lng);
-
-  const distance = R * Math.acos(
-    Math.cos(lat1) * Math.cos(lat2) * Math.cos(lon1 - lon2) +
-    Math.sin(lat1) * Math.sin(lat2)
-  );
-
-  return distance; // Distance in kilometers
-};
-
-const calculateRhumbDistance = (latlng1, latlng2) => {
-  const R = 6371.0; // Earth's radius in kilometers
-  const toRadians = (degrees) => degrees * (Math.PI / 180);
-
-  const d1 = toRadians(latlng1.lat);
-  const d2 = toRadians(latlng2.lat);
-  const a1 = d2 - d1;
-  let a2 = toRadians(latlng2.lng - latlng1.lng);
-
-  // Ensure a2 is in the range [-π, π]
-  if (Math.abs(a2) > Math.PI) {
-    a2 = a2 > 0 ? -(2 * Math.PI - a2) : (2 * Math.PI + a2);
-  }
-
-  const a3 = Math.log(Math.tan(Math.PI / 4 + d2 / 2) / Math.tan(Math.PI / 4 + d1 / 2));
-  const q = Math.abs(a3) > 10e-12 ? a1 / a3 : Math.cos(d1);
-
-  const distance = Math.sqrt(a1 * a1 + q * q * a2 * a2) * R;
-
-  return distance; // Distance in kilometers
-};
-
-const calculateCurvatureAngle = (latlng1, latlng2, controlPoint) => {
-  const toRadians = (degrees) => degrees * (Math.PI / 180);
-  const toDegrees = (radians) => radians * (180 / Math.PI);
-
-  const angle1 = Math.atan2(controlPoint.lat - latlng1.lat, controlPoint.lng - latlng1.lng);
-  const angle2 = Math.atan2(latlng2.lat - latlng1.lat, latlng2.lng - latlng1.lng);
-  const angleDiff = angle2 - angle1;
-
-  return Math.abs(toDegrees(angleDiff));
-};
-
-const calculateGreatCirclePath = (latlng1, latlng2, numPoints = 100) => {
+const calculateGreatCirclePath = (latlng1, latlng2, numPoints = 50) => {
   const toRadians = (degrees) => degrees * (Math.PI / 180);
   const toDegrees = (radians) => radians * (180 / Math.PI);
 
@@ -127,154 +42,159 @@ const calculateGreatCirclePath = (latlng1, latlng2, numPoints = 100) => {
     waypoints.push({ lat: toDegrees(lat), lng: toDegrees(lon) });
   }
 
-  // Adjust waypoints for wrap-around if necessary
-  for (let i = 1; i < waypoints.length; i++) {
-    if (Math.abs(waypoints[i].lng - waypoints[i - 1].lng) > 180) {
-      if (waypoints[i].lng > waypoints[i - 1].lng) {
-        waypoints[i].lng -= 360;
-      } else {
-        waypoints[i].lng += 360;
-      }
-    }
-  }
-
   return waypoints;
 };
 
-const DrawControl = ({ setSegments }) => {
-  const map = useMap();
-  const drawnItems = useRef(new L.FeatureGroup()).current;
+const calculateRhumbDistance = (latlng1, latlng2) => {
+  const R = 6371.0; // Earth's radius in kilometers
+  const toRadians = (degrees) => degrees * (Math.PI / 180);
 
-  useEffect(() => {
-    const drawControl = new L.Control.Draw({
-      edit: {
-        featureGroup: drawnItems,
-      },
-      draw: {
-        polyline: true,
-        polygon: false,
-        rectangle: false,
-        circle: false,
-        marker: false,
-        circlemarker: false,
-      },
-    });
+  const φ1 = toRadians(latlng1.lat);
+  const φ2 = toRadians(latlng2.lat);
+  const Δφ = φ2 - φ1;
+  let Δλ = toRadians(latlng2.lng - latlng1.lng);
 
-    map.addControl(drawControl);
+  // Ensure Δλ is in the range [-π, π]
+  if (Math.abs(Δλ) > Math.PI) {
+    Δλ = Δλ > 0 ? -(2 * Math.PI - Δλ) : (2 * Math.PI + Δλ);
+  }
 
-    map.on(L.Draw.Event.CREATED, (event) => {
-      const { layerType, layer } = event;
-      if (layerType === 'polyline') {
-        const latlngs = layer.getLatLngs();
-        const segments = latlngs.map((latlng, index) => {
-          if (!latlngs[index + 1]) return null; // Skip the last incomplete segment
-          const initialWaypoint = latlng;
-          const endingWaypoint = latlngs[index + 1];
-          const rhumbDistance = calculateRhumbDistance(initialWaypoint, endingWaypoint);
-          const greatCircleDistance = calculateGreatCircleDistance(initialWaypoint, endingWaypoint);
-          const waypoints = calculateGreatCirclePath(initialWaypoint, endingWaypoint);
+  const Δψ = Math.log(Math.tan(Math.PI / 4 + φ2 / 2) / Math.tan(Math.PI / 4 + φ1 / 2));
+  const q = Math.abs(Δψ) > 10e-12 ? Δφ / Δψ : Math.cos(φ1);
 
-          return {
-            latlngs: [initialWaypoint, endingWaypoint],
-            waypoints,
-            rhumbDistance,
-            greatCircleDistance,
-            curvatureAngle: waypoints.length ? calculateCurvatureAngle(initialWaypoint, endingWaypoint, waypoints[Math.floor(waypoints.length / 2)]) : 0,
-          };
-        }).filter(Boolean); // Remove null values
+  const distance = Math.sqrt(Δφ * Δφ + q * q * Δλ * Δλ) * R;
 
-        setSegments((prevSegments) => [...prevSegments, ...segments]);
-        drawnItems.addLayer(layer);
-      }
-    });
+  return distance; // Distance in kilometers
+};
 
-    map.addLayer(drawnItems);
+const calculateGreatCircleDistance = (latlng1, latlng2) => {
+  const R = 6371.0; // Earth's radius in kilometers
+  const toRadians = (degrees) => degrees * (Math.PI / 180);
 
-    return () => {
-      map.off(L.Draw.Event.CREATED);
-      map.removeLayer(drawnItems);
-      map.removeControl(drawControl);
-    };
-  }, [map, drawnItems, setSegments]);
+  const lat1 = toRadians(latlng1.lat);
+  const lon1 = toRadians(latlng1.lng);
+  const lat2 = toRadians(latlng2.lat);
+  const lon2 = toRadians(latlng2.lng);
 
-  return null;
+  const distance = R * Math.acos(
+    Math.cos(lat1) * Math.cos(lat2) * Math.cos(lon1 - lon2) +
+    Math.sin(lat1) * Math.sin(lat2)
+  );
+
+  return distance; // Distance in kilometers
+};
+
+const calculateCurvatureAngle = (latlng1, latlng2, controlPoint) => {
+  //const toRadians = (degrees) => degrees * (Math.PI / 180);
+  const toDegrees = (radians) => radians * (180 / Math.PI);
+
+  const angle1 = Math.atan2(controlPoint.lat - latlng1.lat, controlPoint.lng - latlng1.lng);
+  const angle2 = Math.atan2(latlng2.lat - latlng1.lat, latlng2.lng - latlng1.lng);
+  const angleDiff = angle2 - angle1;
+
+  return Math.abs(toDegrees(angleDiff));
 };
 
 const MapComponent = () => {
-  const position = [51.505, -0.09];
-  const [segments, setSegments] = useState([]);
-  const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0, segmentIndex: null });
+  const mapElement = useRef();
+  const [draw, setDraw] = useState(null);
+  const [drawSource] = useState(new VectorSource());
 
-  const handleSegmentClick = (index, action) => {
-    setSegments((prevSegments) => {
-      const newSegments = [...prevSegments];
-      const segment = newSegments[index];
+  useEffect(() => {
+    const initialCenter = fromLonLat([0, 0]);
+    const initialZoom = 2;
 
-      if (action === 'greatcircle' && !segment.waypoints.length) {
-        const [initialWaypoint, endingWaypoint] = segment.latlngs;
-        segment.rhumbDistance = calculateRhumbDistance(initialWaypoint, endingWaypoint);
-        segment.greatCircleDistance = calculateGreatCircleDistance(initialWaypoint, endingWaypoint);
-        segment.waypoints = calculateGreatCirclePath(initialWaypoint, endingWaypoint);
-        segment.curvatureAngle = calculateCurvatureAngle(initialWaypoint, endingWaypoint, segment.waypoints[Math.floor(segment.waypoints.length / 2)]);
+    const rasterLayer = new TileLayer({
+      source: new OSM(),
+    });
 
-        console.log(`Segment ${index + 1}:`);
-        console.log("Initial Waypoint:", initialWaypoint);
-        console.log("Ending Waypoint:", endingWaypoint);
-        console.log("Waypoints:", segment.waypoints);
-        console.log("Rhumb Line Distance:", segment.rhumbDistance.toFixed(2), "km");
-        console.log("Great Circle Distance:", segment.greatCircleDistance.toFixed(2), "km");
-        console.log("Curvature Angle:", segment.curvatureAngle.toFixed(2), "°");
-      } else if (action === 'rhumb' && segment.waypoints.length) {
-        segment.waypoints = [];
-        segment.curvatureAngle = 0;
+    const drawLayer = new VectorLayer({
+      source: drawSource,
+      style: new Style({
+        stroke: new Stroke({
+          color: 'red',
+          width: 2,
+        }),
+      }),
+    });
+
+    const map = new Map({
+      target: mapElement.current,
+      layers: [rasterLayer, drawLayer],
+      view: new View({
+        center: initialCenter,
+        zoom: initialZoom,
+      }),
+    });
+
+    const drawInteraction = new Draw({
+      source: drawSource,
+      type: 'LineString',
+    });
+
+    drawInteraction.on('drawend', (event) => {
+      const feature = event.feature;
+      const geometry = feature.getGeometry();
+      const coordinates = geometry.getCoordinates();
+      const newCoordinates = [];
+
+      for (let i = 0; i < coordinates.length - 1; i++) {
+        const startCoord = toLonLat(coordinates[i]);
+        const endCoord = toLonLat(coordinates[i + 1]);
+
+        const start = { lat: startCoord[1], lng: startCoord[0] };
+        const end = { lat: endCoord[1], lng: endCoord[0] };
+
+        console.log(`Start Point: ${start.lat}, ${start.lng}`);
+        console.log(`End Point: ${end.lat}, ${end.lng}`);
+
+        const distance = calculateGreatCircleDistance(start, end);
+        console.log(`Great Circle Distance: ${distance} km`);
+
+        const rhumpLineDistance=calculateRhumbDistance(start,end);
+        console.log(`Rhump line distance: ${rhumpLineDistance}`)
+
+        const path = calculateGreatCirclePath(start, end);
+        console.log('Great Circle Path Waypoints:', path);
+
+        const controlPointIndex = Math.floor(path.length / 2); // Take a point halfway between start and end
+        const controlPoint = path[controlPointIndex];
+        const curvatureAngle = calculateCurvatureAngle(start, end, controlPoint);
+        console.log(`Curvature Angle: ${curvatureAngle} degrees`);
+
+        path.forEach((point) => {
+          newCoordinates.push(fromLonLat([point.lng, point.lat]));
+        });
       }
 
-      return newSegments;
+      const curvedLine = new LineString(newCoordinates);
+      feature.setGeometry(curvedLine);
     });
-  };
 
-  const handleContextMenu = (e, index) => {
-    L.DomEvent.preventDefault(e); // Prevent the default context menu
-    setContextMenu({
-      visible: true,
-      x: e.containerPoint.x,
-      y: e.containerPoint.y,
-      segmentIndex: index
-    });
-  };
+    map.addInteraction(drawInteraction);
+    setDraw(drawInteraction);
 
-  const handleContextMenuAction = (action) => {
-    if (contextMenu.segmentIndex !== null) {
-      handleSegmentClick(contextMenu.segmentIndex, action);
-      setContextMenu({ ...contextMenu, visible: false });
+    const modifyInteraction = new Modify({ source: drawSource });
+    map.addInteraction(modifyInteraction);
+
+    const snapInteraction = new Snap({ source: drawSource });
+    map.addInteraction(snapInteraction);
+
+    return () => {
+      map.setTarget(undefined);
+    };
+  }, [drawSource]);
+
+  const toggleDraw = () => {
+    if (draw) {
+      draw.setActive(!draw.getActive());
     }
   };
 
   return (
     <div>
-      <MapContainer
-        center={position}
-        zoom={2}
-        style={{ height: '100vh', width: '100%' }}
-        worldCopyJump={true}
-      >
-        <TileLayer
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-        />
-        <DrawControl setSegments={setSegments} />
-        <PolylineComponent segments={segments} handleSegmentClick={handleSegmentClick} handleContextMenu={handleContextMenu} />
-      </MapContainer>
-
-      {contextMenu.visible && (
-        <div className="context-menu" style={{ top: contextMenu.y, left: contextMenu.x }}>
-          {segments[contextMenu.segmentIndex].waypoints.length ? (
-            <div onClick={() => handleContextMenuAction('rhumb')}>Convert to Rhumb Line</div>
-          ) : (
-            <div onClick={() => handleContextMenuAction('greatcircle')}>Convert to Great Circle Path</div>
-          )}
-        </div>
-      )}
+      <div ref={mapElement} style={{ width: '100%', height: '90vh' }} />
+      <button onClick={toggleDraw}>Toggle Draw</button>
     </div>
   );
 };
