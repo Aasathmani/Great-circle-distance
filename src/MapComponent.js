@@ -1,16 +1,41 @@
-import React, { useEffect, useRef, useState } from 'react';
-import 'ol/ol.css';
-import { Map, View } from 'ol';
-import TileLayer from 'ol/layer/Tile';
-import OSM from 'ol/source/OSM';
-import { fromLonLat, toLonLat } from 'ol/proj';
-import { LineString } from 'ol/geom';
-import VectorLayer from 'ol/layer/Vector';
-import VectorSource from 'ol/source/Vector';
-import { Stroke, Style } from 'ol/style';
-import { Draw, Modify, Snap, Select } from 'ol/interaction';
-import { click } from 'ol/events/condition';
+import React, { useEffect, useRef, useState } from "react";
+import "ol/ol.css";
+import { Map, View } from "ol";
+import TileLayer from "ol/layer/Tile";
+import OSM from "ol/source/OSM";
+import { LineString, Point } from "ol/geom";
+import VectorLayer from "ol/layer/Vector";
+import VectorSource from "ol/source/Vector";
+import { Stroke, Style, Fill, Circle as CircleStyle } from "ol/style";
+import { Draw, Modify, Snap, Select } from "ol/interaction";
+import Feature from "ol/Feature";
+import { click } from "ol/events/condition";
 
+// Define styles
+const pointStyle = new Style({
+  image: new CircleStyle({
+    radius: 5,
+    fill: new Fill({
+      color: 'green',
+    }),
+  }),
+});
+
+const greatCircleStyle = new Style({
+  stroke: new Stroke({
+    color: 'red',
+    width: 2,
+  }),
+});
+
+const rhumbLineStyle = new Style({
+  stroke: new Stroke({
+    color: 'blue',
+    width: 2,
+  }),
+});
+
+// Function to calculate the Great Circle path
 const calculateGreatCirclePath = (latlng1, latlng2, numPoints = 50) => {
   const toRadians = (degrees) => degrees * (Math.PI / 180);
   const toDegrees = (radians) => radians * (180 / Math.PI);
@@ -20,12 +45,14 @@ const calculateGreatCirclePath = (latlng1, latlng2, numPoints = 50) => {
   const lat2 = toRadians(latlng2.lat);
   const lon2 = toRadians(latlng2.lng);
 
-  const d = 2 * Math.asin(
-    Math.sqrt(
-      Math.sin((lat2 - lat1) / 2) ** 2 +
-      Math.cos(lat1) * Math.cos(lat2) * Math.sin((lon2 - lon1) / 2) ** 2
-    )
-  );
+  const d =
+    2 *
+    Math.asin(
+      Math.sqrt(
+        Math.sin((lat2 - lat1) / 2) ** 2 +
+          Math.cos(lat1) * Math.cos(lat2) * Math.sin((lon2 - lon1) / 2) ** 2
+      )
+    );
 
   const waypoints = [];
   for (let i = 0; i <= numPoints; i++) {
@@ -33,8 +60,10 @@ const calculateGreatCirclePath = (latlng1, latlng2, numPoints = 50) => {
     const A = Math.sin((1 - f) * d) / Math.sin(d);
     const B = Math.sin(f * d) / Math.sin(d);
 
-    const x = A * Math.cos(lat1) * Math.cos(lon1) + B * Math.cos(lat2) * Math.cos(lon2);
-    const y = A * Math.cos(lat1) * Math.sin(lon1) + B * Math.cos(lat2) * Math.sin(lon2);
+    const x =
+      A * Math.cos(lat1) * Math.cos(lon1) + B * Math.cos(lat2) * Math.cos(lon2);
+    const y =
+      A * Math.cos(lat1) * Math.sin(lon1) + B * Math.cos(lat2) * Math.sin(lon2);
     const z = A * Math.sin(lat1) + B * Math.sin(lat2);
 
     const lat = Math.atan2(z, Math.sqrt(x * x + y * y));
@@ -46,6 +75,7 @@ const calculateGreatCirclePath = (latlng1, latlng2, numPoints = 50) => {
   return waypoints;
 };
 
+// Function to calculate the Rhumb Line path
 const calculateRhumbLinePath = (start, end) => {
   return [start, end];
 };
@@ -56,10 +86,14 @@ const MapComponent = () => {
   const [drawSource] = useState(new VectorSource());
   const [selectedFeature, setSelectedFeature] = useState(null);
   const [currentType, setCurrentType] = useState(null);
+  const [selectedPoint, setSelectedPoint] = useState(null);
   const contextMenuRef = useRef();
+  const mapRef = useRef(null);
+  const pointsArray = useRef([]);
+  const globalCoordinates = useRef([]);
 
   useEffect(() => {
-    const initialCenter = fromLonLat([0, 0]);
+    const initialCenter = [0, 0];
     const initialZoom = 2;
 
     const rasterLayer = new TileLayer({
@@ -70,7 +104,7 @@ const MapComponent = () => {
       source: drawSource,
       style: new Style({
         stroke: new Stroke({
-          color: 'red',
+          color: "red",
           width: 2,
         }),
       }),
@@ -82,23 +116,29 @@ const MapComponent = () => {
       view: new View({
         center: initialCenter,
         zoom: initialZoom,
+        projection: "EPSG:4326",
       }),
     });
+    mapRef.current = map;
 
     const drawInteraction = new Draw({
       source: drawSource,
-      type: 'LineString',
+      type: "LineString",
     });
 
-    drawInteraction.on('drawend', (event) => {
+    drawInteraction.on("drawend", (event) => {
       const feature = event.feature;
       const geometry = feature.getGeometry();
       const coordinates = geometry.getCoordinates();
+      console.log(coordinates);
+
+      globalCoordinates.current = coordinates; // Store globally
+
       const newCoordinates = [];
 
       for (let i = 0; i < coordinates.length - 1; i++) {
-        const startCoord = toLonLat(coordinates[i]);
-        const endCoord = toLonLat(coordinates[i + 1]);
+        const startCoord = coordinates[i];
+        const endCoord = coordinates[i + 1];
 
         const start = { lat: startCoord[1], lng: startCoord[0] };
         const end = { lat: endCoord[1], lng: endCoord[0] };
@@ -106,15 +146,23 @@ const MapComponent = () => {
         const path = calculateGreatCirclePath(start, end);
 
         path.forEach((point) => {
-          newCoordinates.push(fromLonLat([point.lng, point.lat]));
+          newCoordinates.push([point.lng, point.lat]);
         });
       }
 
       const curvedLine = new LineString(newCoordinates);
       feature.setGeometry(curvedLine);
-      feature.set('type', 'greatCircle');
+      feature.set("type", "greatCircle");
 
-      drawInteraction.setActive(false);  // Disable draw interaction after drawing a segment
+      coordinates.forEach((coord) => {
+        const point = new Point(coord);
+        const pointFeature = new Feature(point);
+        pointFeature.setStyle(pointStyle);
+        drawSource.addFeature(pointFeature);
+        pointsArray.current.push(pointFeature); // Store point in points array
+      });
+
+      drawInteraction.setActive(false); // Disable draw interaction after drawing a segment
     });
 
     map.addInteraction(drawInteraction);
@@ -130,11 +178,24 @@ const MapComponent = () => {
       condition: click,
     });
 
-    selectInteraction.on('select', (event) => {
+    selectInteraction.on("select", (event) => {
       const feature = event.selected[0];
       if (feature) {
         setSelectedFeature(feature);
-        setCurrentType(feature.get('type'));
+        setCurrentType(feature.get("type"));
+
+        // Log start and end waypoints
+        const coordinates = feature.getGeometry().getCoordinates();
+        if (coordinates.length >= 2) {
+          const startCoord = coordinates[0];
+          const endCoord = coordinates[coordinates.length - 1];
+          console.log("Start:", { lat: startCoord[1], lng: startCoord[0] });
+          console.log("End:", { lat: endCoord[1], lng: endCoord[0] });
+        } else {
+          console.log("Insufficient coordinates for feature:", feature);
+        }
+
+        console.log("Selected feature:", feature);
       } else {
         setSelectedFeature(null);
         setCurrentType(null);
@@ -143,20 +204,31 @@ const MapComponent = () => {
 
     map.addInteraction(selectInteraction);
 
-    mapElement.current.addEventListener('contextmenu', (event) => {
+    mapElement.current.addEventListener("contextmenu", (event) => {
       event.preventDefault();
-      const contextMenu = contextMenuRef.current;
-      if (contextMenu) {
-        contextMenu.style.left = `${event.clientX}px`;
-        contextMenu.style.top = `${event.clientY}px`;
-        contextMenu.style.display = 'block';
+      const map = mapRef.current;
+      if (!map) return;
+
+      const pixel = map.getEventPixel(event);
+      const feature = map.forEachFeatureAtPixel(pixel, (feature) => feature);
+
+      if (feature && feature.getGeometry().getType() === 'Point') {
+        setSelectedPoint(feature);
+        const contextMenu = contextMenuRef.current;
+        if (contextMenu) {
+          contextMenu.style.left = `${event.clientX}px`;
+          contextMenu.style.top = `${event.clientY}px`;
+          contextMenu.style.display = "block";
+        }
+      } else {
+        setSelectedPoint(null);
       }
     });
 
-    window.addEventListener('click', (event) => {
+    window.addEventListener("click", (event) => {
       const contextMenu = contextMenuRef.current;
       if (contextMenu && event.button !== 2) {
-        contextMenu.style.display = 'none';
+        contextMenu.style.display = "none";
       }
     });
 
@@ -165,85 +237,75 @@ const MapComponent = () => {
     };
   }, [drawSource]);
 
-  const convertLine = (type) => {
-    if (!selectedFeature) return;
+  const handlePointClick = (type) => {
+    if (!selectedPoint) return;
 
-    const geometry = selectedFeature.getGeometry();
-    const coordinates = geometry.getCoordinates();
-    let newCoordinates = [];
+    const pointCoordinates = selectedPoint.getGeometry().getCoordinates();
+    const pointIndex = globalCoordinates.current.findIndex(
+      (coord) => coord[0] === pointCoordinates[0] && coord[1] === pointCoordinates[1]
+    );
 
-    if (type === 'greatCircle') {
-      for (let i = 0; i < coordinates.length - 1; i++) {
-        const startCoord = toLonLat(coordinates[i]);
-        const endCoord = toLonLat(coordinates[i + 1]);
-
-        const start = { lat: startCoord[1], lng: startCoord[0] };
-        const end = { lat: endCoord[1], lng: endCoord[0] };
-
-        const path = calculateGreatCirclePath(start, end);
-        path.forEach((point) => {
-          newCoordinates.push(fromLonLat([point.lng, point.lat]));
-        });
-      }
-      selectedFeature.set('type', 'greatCircle');
-    } else if (type === 'rhumbLine') {
-      const startCoord = toLonLat(coordinates[0]);
-      const endCoord = toLonLat(coordinates[coordinates.length - 1]);
-
-      const start = { lat: startCoord[1], lng: startCoord[0] };
-      const end = { lat: endCoord[1], lng: endCoord[0] };
-
-      const path = calculateRhumbLinePath(start, end);
-      path.forEach((point) => {
-        newCoordinates.push(fromLonLat([point.lng, point.lat]));
-      });
-      selectedFeature.set('type', 'rhumbLine');
-      console.log('aasath');
+    if (pointIndex <= 0) {
+      console.log("Point not found in global coordinates or is the first point");
+      return;
     }
 
-    const newLine = new LineString(newCoordinates);
-    selectedFeature.setGeometry(newLine);
-  };
+    const previousCoord = globalCoordinates.current[pointIndex - 1];
+    console.log("Current waypoint:", { lat: pointCoordinates[1], lng: pointCoordinates[0] });
+    console.log("Previous waypoint:", { lat: previousCoord[1], lng: previousCoord[0] });
 
-  const toggleDraw = () => {
-    if (draw) {
-      draw.setActive(!draw.getActive());
+    const start = { lat: previousCoord[1], lng: previousCoord[0] };
+    const end = { lat: pointCoordinates[1], lng: pointCoordinates[0] };
+    console.log(start, end);
+
+    // Remove existing feature
+    if (selectedFeature) {
+      drawSource.removeFeature(selectedFeature);
+      setSelectedFeature(null);
+    }
+
+    let newCoordinates = [];
+
+    if (type === "rhumb") {
+      console.log("Rhumb line conversion");
+      const rhumbPath = calculateRhumbLinePath(start, end);
+      newCoordinates = rhumbPath.map(point => [point.lng, point.lat]);
+    } else if (type === "greatCircle") {
+      console.log("Great circle conversion");
+      const greatCirclePath = calculateGreatCirclePath(start, end);
+      newCoordinates = greatCirclePath.map(point => [point.lng, point.lat]);
+    }
+
+    if (newCoordinates.length > 0) {
+      const newFeature = new Feature({
+        geometry: new LineString(newCoordinates),
+        type: type === "rhumb" ? "rhumbLine" : "greatCircle"
+      });
+
+      newFeature.setStyle(type === "rhumb" ? rhumbLineStyle : greatCircleStyle);
+
+      drawSource.addFeature(newFeature);
+      setSelectedFeature(newFeature);
+      setCurrentType(type === "rhumb" ? "rhumbLine" : "greatCircle");
     }
   };
 
   return (
     <div>
-      <div ref={mapElement} style={{ width: '100%', height: '90vh' }} />
+      <div ref={mapElement} style={{ width: "100%", height: "500px" }}></div>
       <div
         ref={contextMenuRef}
-        className="context-menu"
         style={{
-          position: 'absolute',
-          display: 'none',
-          background: 'white',
-          border: '1px solid black',
+          position: "absolute",
+          display: "none",
+          backgroundColor: "white",
+          boxShadow: "0 2px 10px rgba(0, 0, 0, 0.5)",
           zIndex: 1000,
         }}
-        onClick={(e) => {
-          e.stopPropagation();
-          if (currentType === 'rhumbLine') {
-            convertLine('greatCircle');
-          } else {
-            convertLine('rhumbLine');
-          }
-          const contextMenu = contextMenuRef.current;
-          if (contextMenu) {
-            contextMenu.style.display = 'none';
-          }
-        }}
       >
-        {currentType === 'rhumbLine' ? (
-          <div>Convert to Great Circle</div>
-        ) : (
-          <div>Convert to Rhumb Line</div>
-        )}
+        <button onClick={() => handlePointClick("greatCircle")}>Great Circle</button>
+        <button onClick={() => handlePointClick("rhumb")}>Rhumb Line</button>
       </div>
-      <button onClick={toggleDraw}>Toggle Draw</button>
     </div>
   );
 };
